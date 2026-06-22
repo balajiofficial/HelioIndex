@@ -103,3 +103,5 @@ For each of the first 150 timestamps: looks back 240 minutes (observation window
 
 ### June 21, 2026
 - Added `separation_minutes` parameter to `BuildForecastTable` to introduce a configurable gap between the current timestamp and the start of the prediction window, preventing data leakage between observation and prediction periods.
+### June 22, 2026
+- Added `evals` parameter to `WindowLabeler` to support configurable output columns: `goes-class`/`gc` includes the max GOES class per window, `flux`/`fx` derives and includes the peak flux in W/m², and `bl=<threshold>` adds a binary label indicating whether the window's peak class meets or exceeds a specified GOES class or numeric flux threshold.

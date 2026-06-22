@@ -107,8 +107,17 @@ def ObservationWindow(start_time: str, hours: int, cadence: int, sliding_window:
 
     return l
 
-def WindowLabeler(windows: list[list[datetime]], event_match: dict[str, str]) -> pd.DataFrame:
+def WindowLabeler(windows: list[list[datetime]], event_match: dict[str, str], evals: list[str] = None) -> pd.DataFrame:
     GOES_ORDER = ["FQ", "A", "B", "C", "M", "X"]
+
+    GOES_FLUX_BASE = {
+        "FQ": 0.0,
+        "A":  1e-8,
+        "B":  1e-7,
+        "C":  1e-6,
+        "M":  1e-5,
+        "X":  1e-4,
+    }
 
     def goes_rank(cls: str) -> int:
         letter = cls[0].upper() if cls and cls != "FQ" else "FQ"
@@ -117,6 +126,50 @@ def WindowLabeler(windows: list[list[datetime]], event_match: dict[str, str]) ->
     def max_goes(classes: list[str]) -> str:
         return max(classes, key=goes_rank)
 
+    def goes_to_flux(goes: str) -> float:
+        """Convert a GOES class string (e.g. 'M2.5', 'C', 'FQ') to flux in W/m²."""
+        if not goes or goes == "FQ":
+            return 0.0
+        letter = goes[0].upper()
+        base = GOES_FLUX_BASE.get(letter, 0.0)
+        try:
+            multiplier = float(goes[1:]) if len(goes) > 1 else 1.0
+        except ValueError:
+            multiplier = 1.0
+        return base * multiplier
+
+    def parse_bl_threshold(bl_value: str) -> tuple[str, float | None]:
+        """
+        Parse a binary-label threshold string.
+        - Letter only (e.g. 'M')   -> compare by GOES rank (letter and above)
+        - Full class (e.g. 'M1.5') -> compare by numeric flux value
+        Returns (mode, threshold) where mode is 'rank' or 'flux'.
+        """
+        bl_value = bl_value.strip()
+        letter = bl_value[0].upper()
+        if letter not in GOES_ORDER or letter == "FQ":
+            raise ValueError(f"Invalid binary-label threshold: '{bl_value}'")
+        if len(bl_value) == 1:
+            return "rank", goes_rank(letter)
+        else:
+            return "flux", goes_to_flux(bl_value)
+
+    # --- Parse evals ---
+    evals = [e.strip().lower() for e in evals] if evals else []
+
+    include_goes  = any(e in ("goes-class", "gc") for e in evals)
+    include_flux  = any(e in ("flux", "fx")       for e in evals)
+
+    # Binary-label: find any entry starting with "bl="
+    bl_mode      = None   # 'rank' or 'flux'
+    bl_threshold = None   # numeric threshold value
+    for e in evals:
+        if e.startswith("bl="):
+            raw = e[3:]
+            bl_mode, bl_threshold = parse_bl_threshold(raw)
+            break
+
+    # --- Build EName -> GOES class lookup ---
     ename_to_goes: dict[str, str] = {}
     for _, row in event_list.iterrows():
         ename_to_goes[row["EName"]] = row["GOES Class"]
@@ -134,12 +187,30 @@ def WindowLabeler(windows: list[list[datetime]], event_match: dict[str, str]) ->
                 goes = ename_to_goes.get(ename, "FQ")
                 flare_classes.append(goes if goes else "FQ")
 
-        rows.append({
-            "Window": filenames,
-            "Flare": max_goes(flare_classes)
-        })
+        max_class = max_goes(flare_classes)
 
-    return pd.DataFrame(rows, columns=["Window", "Flare"])
+        row = {"Window": filenames}
+
+        if include_goes:
+            row["GOES Class"] = max_class
+
+        if include_flux:
+            row["Flux"] = goes_to_flux(max_class)
+
+        if bl_mode is not None:
+            if bl_mode == "rank":
+                row["Binary Label"] = int(goes_rank(max_class) >= bl_threshold)
+            else:  # flux
+                row["Binary Label"] = int(goes_to_flux(max_class) >= bl_threshold)
+
+        rows.append(row)
+
+    cols = ["Window"]
+    if include_goes:  cols.append("GOES Class")
+    if include_flux:  cols.append("Flux")
+    if bl_mode:       cols.append("Binary Label")
+
+    return pd.DataFrame(rows, columns=cols)
 
 def BuildForecastTable(
     obs_minutes: int,
