@@ -146,6 +146,7 @@ def BuildForecastTable(
     pred_minutes: int,
     cadence_minutes: int,
     labeled: dict[str, str],
+    separation_minutes: int = 0,
     limit: int = None
 ) -> pd.DataFrame:
     """
@@ -154,10 +155,14 @@ def BuildForecastTable(
     GOES class found in the prediction window.
 
     Parameters:
-        obs_minutes    : M - how far back to collect observation timestamps
-        pred_minutes   : N - how far forward to scan for flares
-        cadence_minutes: C - step size when collecting observation window timestamps
-        labeled        : output of TimeStampEventMatchTable(), maps filename -> EName or "FQ"
+        obs_minutes        : M - how far back to collect observation timestamps
+        pred_minutes       : N - how far forward to scan for flares
+        cadence_minutes    : C - step size when collecting observation window timestamps
+        labeled            : output of TimeStampEventMatchTable(), maps filename -> EName or "FQ"
+        separation_minutes : S - gap after current timestamp excluded from prediction
+                              window, to prevent data leakage. Prediction window
+                              becomes (current_dt + S, current_dt + S + N].
+        limit              : optional cap on number of timestamps processed
 
     Returns a DataFrame with columns:
         'Observation Window' : list of timestamps in the lookback window
@@ -176,6 +181,7 @@ def BuildForecastTable(
     obs_td     = timedelta(minutes=obs_minutes)
     pred_td    = timedelta(minutes=pred_minutes)
     cadence_td = timedelta(minutes=cadence_minutes)
+    sep_td     = timedelta(minutes=separation_minutes)
 
     # Build EName -> GOES class lookup from event_list
     ename_to_goes: dict[str, str] = {}
@@ -195,10 +201,11 @@ def BuildForecastTable(
                 obs_window.append(closest)
             t += cadence_td
 
-        # --- Prediction window (look forward N minutes, every timestamp) ---
+        # --- Prediction window (skip separation gap, then look forward N minutes) ---
+        pred_start = current_dt + sep_td
         pred_window = [
             dt for dt in datetimes
-            if current_dt < dt <= current_dt + pred_td
+            if pred_start < dt <= pred_start + pred_td
         ]
 
         # --- Label: max GOES class in prediction window ---

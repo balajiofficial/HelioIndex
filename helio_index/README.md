@@ -98,3 +98,8 @@ Takes the windows from `ObservationWindow` and the `labeled` dictionary to produ
 # bt = BuildForecastTable(240, 480, 60, labeled, 150)
 ```
 For each of the first 150 timestamps: looks back 240 minutes (observation window sampled hourly) and forward 480 minutes (prediction window), then labels the row with the maximum GOES class in the prediction window. Returns a DataFrame with `Observation Window`, `Prediction Window`, and `Label` columns. *(Commented out in test.py.)*
+
+## Changes
+
+### June 21, 2026
+- Added `separation_minutes` parameter to `BuildForecastTable` to introduce a configurable gap between the current timestamp and the start of the prediction window, preventing data leakage between observation and prediction periods.

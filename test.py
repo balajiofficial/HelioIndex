@@ -28,5 +28,5 @@ labeled = TimeStampEventMatchTable() # Returns a dictionary of each timestamp ma
 #pprint.pprint(wl)
 
 # Code that builds PredictionWindow
-# bt = BuildForecastTable(240, 480, 60, labeled, 150) # For every timestamp it goes back specified number of hours to get the observation window and forward to get the prediction window
-# print(bt) # Then it labels the prediction window, for now it takes the max goes_class of all timestamps in the prediction window. it labels the observation window with this label
+bt = BuildForecastTable(240, 480, 60, labeled, 30, 150) # For every timestamp it goes back specified number of hours to get the observation window and forward to get the prediction window
+print(bt) # Then it labels the prediction window, for now it takes the max goes_class of all timestamps in the prediction window. it labels the observation window with this label
