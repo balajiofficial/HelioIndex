@@ -1,10 +1,18 @@
-from .utils import TimeStampEventMatchTable, ObservationWindow, setEventData, setTimeStampData, WindowLabeler, BuildForecastTable
+from .utils import (
+    GoesClass,
+    EventData,
+    TimestampSeries,
+    ObservationWindowBuilder,
+    FullDiskLabeler,
+    ForecastTableBuilder,
+)
 
 
 __all__ = [
-    "TimeStampEventMatchTable",
-    "ObservationWindow",
-    "setEventData",
-    "setTimeStampData",
-    "WindowLabeler"
+    "GoesClass",
+    "EventData",
+    "TimestampSeries",
+    "ObservationWindowBuilder",
+    "FullDiskLabeler",
+    "ForecastTableBuilder",
 ]
