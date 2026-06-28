@@ -9,8 +9,8 @@ import pprint
 
 
 # First load Event and TimeStamp data into objects
-events = EventData('events.csv')
-timestamps = TimestampSeries('files.txt')
+events = EventData('flare_events.csv')
+timestamps = TimestampSeries('timestamps.txt')
 
 # Code that implements TimeStampEventMatchTable (now a method on TimestampSeries)
 labeled = timestamps.match_to_events(events)  # Returns a dictionary of each timestamp matched with a corresponding event with matching start time or FQ if not.
