@@ -6,15 +6,28 @@ A Python library for matching solar image timestamps to flare events and buildin
 
 ## Table of Contents
 
-- [Background](#background)
-  - [GOES flare classes](#goes-flare-classes)
-  - [Typical workflow](#typical-workflow)
-  - [File naming convention](#file-naming-convention)
-- [Directory Structure](#directory-structure)
-- [Classes (in `utils.py`)](#classes-in-utilspy)
-- [Examples (`test.py`)](#examples-testpy)
-- [Known Issues](#known-issues)
-- [Changelog](#changelog)
+- [helio\_index](#helio_index)
+  - [Table of Contents](#table-of-contents)
+  - [Background](#background)
+    - [GOES flare classes](#goes-flare-classes)
+    - [Typical workflow](#typical-workflow)
+    - [File naming convention](#file-naming-convention)
+  - [Directory Structure](#directory-structure)
+    - [File Descriptions](#file-descriptions)
+  - [Classes (in `utils.py`)](#classes-in-utilspy)
+    - [`GoesClass`](#goesclass)
+    - [`EventData(csv_path)`](#eventdatacsv_path)
+    - [`TimestampSeries(path)`](#timestampseriespath)
+    - [`ObservationWindowBuilder(timestamps)`](#observationwindowbuildertimestamps)
+    - [`FullDiskLabeler(events)`](#fulldisklabelerevents)
+    - [`ForecastTableBuilder(timestamps, events)`](#forecasttablebuildertimestamps-events)
+  - [Returns a DataFrame with columns `"Observation Window"`, `"Prediction Window"` (lists of `datetime` objects), and `"Label"` (a GOES class string). Does not validate that `obs_minutes`, `pred_minutes`, or `cadence_minutes` are positive — invalid values silently produce degenerate windows rather than raising.](#returns-a-dataframe-with-columns-observation-window-prediction-window-lists-of-datetime-objects-and-label-a-goes-class-string-does-not-validate-that-obs_minutes-pred_minutes-or-cadence_minutes-are-positive--invalid-values-silently-produce-degenerate-windows-rather-than-raising)
+  - [Known Issues](#known-issues)
+  - [Changelog](#changelog)
+    - [June 21, 2026](#june-21-2026)
+    - [June 22, 2026](#june-22-2026)
+    - [June 25, 2026](#june-25-2026)
+    - [June 27, 2026](#june-27-2026)
 
 ---
 
@@ -78,67 +91,54 @@ helio_index/
 > **Note: Currently, all functions are implemented in `utils.py`.**
 
 ---
-
 ## Classes (in `utils.py`)
 
+### `GoesClass`
+A stateless helper class (all `staticmethod`s, never instantiated) centralizing GOES flare-class parsing, comparison, and conversion logic.
+
+- `rank(cls)` — Returns the ordinal strength of a class string (0 = `"FQ"` through 5 = `"X"`), based only on its leading letter. Unrecognized or empty input defaults to rank 0 (`"FQ"`).
+- `max_class(classes)` — Returns the strongest class string in a list, by `rank()`. Raises `ValueError` on an empty list.
+- `to_flux(goes)` — Converts a class string (e.g. `"M2.5"`) to its X-ray flux in W/m², as `FLUX_BASE[letter] * multiplier`. Returns `0.0` for falsy input, `"FQ"`, or an unrecognized letter; falls back to a multiplier of `1.0` if the numeric suffix can't be parsed.
+- `parse_threshold(bl_value)` — Parses a binary-label threshold string into a `(mode, value)` pair: a bare letter (e.g. `"M"`) yields `("rank", <rank>)` (matches "this letter or stronger"); a full class (e.g. `"M1.5"`) yields `("flux", <flux value>)` (matches by exact magnitude). Raises `ValueError` for an unrecognized or `"FQ"` leading letter.
+
 ### `EventData(csv_path)`
-Wraps a CSV file of solar flare events, loading it into an internal DataFrame on construction. Provides `lookup_event(date_part, time_part)` to match a date/time pair to an event name, and `goes_class_for(ename)` to look up an event's GOES class.
+Wraps a CSV file of solar flare events (must contain `Date`, `Start`, `EName`, and `GOES Class` columns), loading it into an internal DataFrame on construction and building lookup tables for fast matching.
+
+- `lookup_event(date_part, time_part)` — Looks up the event name for a compact `(date, time)` digit pair (e.g. `"20140112"`, `"153000"`), matching it against an internal `(date, time) -> EName` table built from the CSV's `Date`/`Start` columns with separators stripped. Returns `"FQ"` if no event started at that exact timestamp.
+- `goes_class_for(ename)` — Resolves an event name to its GOES class string via an internal `EName -> GOES Class` table. Returns `"FQ"` for the literal input `"FQ"`, an unrecognized event name, or a missing/blank class value in the catalog.
 
 ### `TimestampSeries(path)`
-Wraps a text file of image filenames, parsing both the raw filenames and their `datetime` values on construction. Provides `closest(target)` to find the nearest available timestamp, `in_range(start, end)` to filter timestamps within a window, and `match_to_events(events)` to match each filename to a solar flare event by comparing date and start time, returning a dictionary mapping each filename to an event name (`EName`) or `"FQ"` (quiet sun) if no event matches.
+Wraps a plain text file of image filenames (one per line, format `YYYYMMDD_HHMMSS.<ext>`), parsing both the raw filenames and their `datetime` values on construction. Assumes the file is already in chronological order.
 
-### `GoesClass`
-A stateless helper class centralizing GOES flare-class logic: `rank(cls)` for ordinal comparison, `max_class(classes)` for the highest class in a list, `to_flux(goes)` for converting a class string to flux in W/m², and `parse_threshold(bl_value)` for parsing binary-label thresholds.
+- `__len__()` — Number of timestamped filenames loaded.
+- `closest(target)` — Returns the single `datetime` in the series with the smallest absolute difference from `target` (linear scan; ties go to the first match in list order).
+- `in_range(start, end, inclusive_start=False)` — Returns all datetimes falling in `(start, end]` by default, or `[start, end]` if `inclusive_start=True`.
+- `match_to_events(events)` — Matches each filename's timestamp to an `EventData` catalog by splitting its `YYYYMMDD_HHMMSS` stem into date/time parts and doing an **exact** lookup (not nearest-neighbor). Returns a dict mapping each filename to its matched `EName`, or `"FQ"` if unmatched or malformed.
 
 ### `ObservationWindowBuilder(timestamps)`
-Constructed with a `TimestampSeries`. Its `build(start_time, hours, cadence, sliding_window, end_time)` method generates a list of sliding observation windows between two timestamps, where each window spans a given number of hours and samples timestamps at a specified cadence (in minutes).
+Constructed with a `TimestampSeries`. Builds fixed-duration sliding windows of timestamps for use as model input sequences.
+
+- `build(start_time, hours, cadence, sliding_window=None, end_time=None)` — Generates a list of sliding observation windows, each spanning `hours` hours and internally sampled every `cadence` minutes (snapped to the closest real timestamp). Window starts advance by `sliding_window` minutes between windows (defaulting to `cadence` if not given), stopping once a full window would exceed `end_time` or the series' last timestamp. `sliding_window` and `end_time` must be supplied together or not at all. Returns `None` (with a printed message) if `start_time` or `end_time` doesn't exactly match a timestamp in the series, or if only one of `sliding_window`/`end_time` is given. Note: omitting both `sliding_window` and `end_time` will raise a `TypeError` rather than returning cleanly, since `end_time` is required internally — in practice it should always be supplied.
 
 ### `FullDiskLabeler(events)`
-Constructed with an `EventData` instance. Its `label(windows, event_match, evals)` method takes a list of observation windows and the event match dictionary, then returns a DataFrame labeling each window with the highest GOES flare class (`A`, `B`, `C`, `M`, `X`, or `FQ`) observed within it, plus optional flux and binary-label columns depending on `evals`.
+Constructed with an `EventData` instance. Labels pre-built observation windows with the strongest flare activity observed within each.
+
+- `label(windows, event_match, evals=None)` — For each window, converts its timestamps to filenames, looks each up in `event_match` (defaulting to `"FQ"` if absent), resolves to GOES classes via `events.goes_class_for`, and takes the window's strongest class via `GoesClass.max_class`. Returns a DataFrame with one row per window. The `evals` list controls which columns are included (case-insensitive, others ignored):
+  - `"goes-class"` / `"gc"` → adds a `"GOES Class"` column.
+  - `"flux"` / `"fx"` → adds a `"Flux"` column (via `GoesClass.to_flux`).
+  - `"bl=<threshold>"` → adds a `"Binary Label"` column, thresholded per `GoesClass.parse_threshold` (rank-based for a bare letter, flux-based for a full class string). Only the first `"bl="` entry is honored.
+  
+  A `"Window"` column (list of filenames) is always present. If `evals` is omitted, only `"Window"` is returned.
 
 ### `ForecastTableBuilder(timestamps, events)`
-Constructed with a `TimestampSeries` and an `EventData` instance. Its `build(obs_minutes, pred_minutes, cadence_minutes, labeled, separation_minutes, limit)` method builds, for each timestamp, a lookback observation window and a lookahead prediction window, then labels each row with the maximum GOES class found in the prediction window — producing a DataFrame ready for machine learning.
+Constructed with a `TimestampSeries` and an `EventData` instance. Unlike `ObservationWindowBuilder` + `FullDiskLabeler`, this builds one row **per timestamp** in the series, pairing a look-back observation window with a look-ahead prediction window (with an optional separation gap to prevent label leakage).
 
----
-
-## Examples (`test.py`)
-
-`test.py` demonstrates the full pipeline from data loading to forecast table construction.
-
-### 1. Loading data
-```python
-events = EventData('events.csv')
-timestamps = TimestampSeries('files.txt')
-```
-Both data sources are loaded into their own objects up front, rather than into module-level globals, so each object owns its own state.
-
-### 2. `match_to_events`
-```python
-labeled = timestamps.match_to_events(events)
-```
-Reads the loaded timestamps and event list and returns a dictionary. Each image filename maps to its corresponding `EName` if the date and start time match an event in `events.csv`, or `"FQ"` if no event matches.
-
-### 3. `ObservationWindowBuilder`
-```python
-# window_builder = ObservationWindowBuilder(timestamps)
-# ow = window_builder.build("20251001_001400", 4, 15, 60, "20251002_001400")
-```
-Generates 4-hour observation windows starting at `20251001_001400`, sampled every 15 minutes, sliding forward by 60 minutes at a time until `20251002_001400`. *(Commented out in test.py.)*
-
-### 4. `FullDiskLabeler`
-```python
-# labeler = FullDiskLabeler(events)
-# wl = labeler.label(ow, labeled)
-```
-Takes the windows from `ObservationWindowBuilder` and the `labeled` dictionary to produce a DataFrame where each window is tagged with its peak flare class. *(Commented out in test.py.)*
-
-### 5. `ForecastTableBuilder`
-```python
-# forecast_builder = ForecastTableBuilder(timestamps, events)
-# bt = forecast_builder.build(240, 480, 60, labeled, limit=150)
-```
-For each of the first 150 timestamps: looks back 240 minutes (observation window sampled hourly) and forward 480 minutes (prediction window), then labels the row with the maximum GOES class in the prediction window. Returns a DataFrame with `Observation Window`, `Prediction Window`, and `Label` columns. *(Commented out in test.py.)*
-
+- `build(obs_minutes, pred_minutes, cadence_minutes, labeled, separation_minutes=0, limit=None)` — For each reference timestamp (or the first `limit` timestamps, if given):
+  - **Observation window**: steps from `current_dt - obs_minutes` to `current_dt` every `cadence_minutes`, snapping each step to its closest real timestamp via `closest()` and skipping duplicates.
+  - **Prediction window**: starts at `current_dt + separation_minutes` and spans forward `pred_minutes`, via `TimestampSeries.in_range` with its default exclusive start (so the reference timestamp is never reused in the prediction window).
+  - **Label**: the strongest GOES class (`GoesClass.max_class`) among events matched (via `labeled`) to filenames in the prediction window; defaults to `"FQ"` if the prediction window is empty.
+  
+  Returns a DataFrame with columns `"Observation Window"`, `"Prediction Window"` (lists of `datetime` objects), and `"Label"` (a GOES class string). Does not validate that `obs_minutes`, `pred_minutes`, or `cadence_minutes` are positive — invalid values silently produce degenerate windows rather than raising.
 ---
 
 ## Known Issues
