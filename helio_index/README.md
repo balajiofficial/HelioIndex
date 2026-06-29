@@ -22,7 +22,6 @@ A Python library for matching solar image timestamps to flare events and buildin
     - [`FullDiskLabeler(events)`](#fulldisklabelerevents)
     - [`ForecastTableBuilder(timestamps, events)`](#forecasttablebuildertimestamps-events)
   - [Returns a DataFrame with columns `"Observation Window"`, `"Prediction Window"` (lists of `datetime` objects), and `"Label"` (a GOES class string). Does not validate that `obs_minutes`, `pred_minutes`, or `cadence_minutes` are positive — invalid values silently produce degenerate windows rather than raising.](#returns-a-dataframe-with-columns-observation-window-prediction-window-lists-of-datetime-objects-and-label-a-goes-class-string-does-not-validate-that-obs_minutes-pred_minutes-or-cadence_minutes-are-positive--invalid-values-silently-produce-degenerate-windows-rather-than-raising)
-  - [Known Issues](#known-issues)
   - [Changelog](#changelog)
     - [June 21, 2026](#june-21-2026)
     - [June 22, 2026](#june-22-2026)
@@ -139,12 +138,6 @@ Constructed with a `TimestampSeries` and an `EventData` instance. Unlike `Observ
   - **Label**: the strongest GOES class (`GoesClass.max_class`) among events matched (via `labeled`) to filenames in the prediction window; defaults to `"FQ"` if the prediction window is empty.
   
   Returns a DataFrame with columns `"Observation Window"`, `"Prediction Window"` (lists of `datetime` objects), and `"Label"` (a GOES class string). Does not validate that `obs_minutes`, `pred_minutes`, or `cadence_minutes` are positive — invalid values silently produce degenerate windows rather than raising.
----
-
-## Known Issues
-
-- **`ObservationWindowBuilder.build` hangs on `hours=0` and `cadence=0`.** Both produce zero-length `timedelta`s, so the inner sampling loop never advances and the call never returns. This is a pre-existing bug, not introduced by the June 25, 2026 refactor. `test.py` uses non-zero values and documents this in a comment as a workaround; a future fix should validate these arguments and raise instead of hanging.
-
 ---
 
 ## Changelog
